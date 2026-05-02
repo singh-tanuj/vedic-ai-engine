@@ -3,25 +3,24 @@ from datetime import timedelta
 from pydantic import BaseModel
 from typing import Dict, List, Optional
 
-# --- Pydantic Schemas for Deterministic Output ---
+# --- Pydantic Schemas ---
+class VargaAnalysis(BaseModel):
+    d2_hora: int
+    d3_drekkana: int
+    d4_chaturtamsa: int
+    d7_saptamsa: int
+    d9_navamsa: int
+    d10_dasamsa: int
+    d12_dwadasamsa: int
+    d16_shodasamsa: int
+    d24_siddhamsa: int
+    d60_shashtiamsa: int
+
 class PlanetStrength(BaseModel):
     positional_score: float
     directional_score: float
     total_weighted_strength: float
     status: str
-
-class HouseDetail(BaseModel):
-    house: int
-    domain: str
-
-class NavamsaDetail(BaseModel):
-    d9_sign: int
-    is_vargottama: bool
-    potency: str
-
-class AshtakavargaDetail(BaseModel):
-    score: int
-    intensity: str
 
 class PanchangDetail(BaseModel):
     vara: str
@@ -35,55 +34,65 @@ DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Satur
 DASHA_DATA = [("Ketu", 7), ("Venus", 20), ("Sun", 6), ("Moon", 10), ("Mars", 7), ("Rahu", 18), ("Jupiter", 16), ("Saturn", 19), ("Mercury", 17)]
 NAKSHATRAS = ["Ashwini", "Bharani", "Krittika", "Rohini", "Mrigashira", "Ardra", "Punarvasu", "Pushya", "Ashlesha", "Magha", "Purva Phalguni", "Uttara Phalguni", "Hasta", "Chitra", "Swati", "Vishakha", "Anuradha", "Jyeshtha", "Mula", "Purva Ashadha", "Uttara Ashadha", "Shravana", "Dhanishta", "Shatabhisha", "Purva Bhadrapada", "Uttara Bhadrapada", "Revati"]
 
-# --- New V5: Agentic Narrative Helper ---
-def get_v5_agentic_summary(panchang: PanchangDetail, v3: Dict, v2: Dict) -> str:
-    """Consolidates complex data into a summary string for LLM context."""
-    strongest = [p for p, d in v3.items() if d.intensity == "High"]
-    vargottama = [p for p, d in v2.items() if d.is_vargottama]
+# --- Universal Varga Engine ---
+def get_varga_sign(planet_lon: float, division: int) -> int:
+    """
+    Generalized sharding logic for Shodashvarga (Divisional Charts).
+    """
+    shard_size = 30.0 / division
+    sign_idx = int(planet_lon / 30)
+    lon_in_sign = planet_lon % 30
+    shard_idx = int(lon_in_sign / shard_size)
     
-    return f"Environment is {panchang.tithi_name} ({panchang.phase}). " \
-           f"Key strengths identified in {', '.join(strongest)}. " \
-           f"Soul-aligned (Vargottama) planets: {', '.join(vargottama) if vargottama else 'None'}."
+    # Specific starting rules for non-sequential charts
+    if division == 2: # Hora
+        is_odd = (sign_idx + 1) % 2 != 0
+        if is_odd: return 5 if shard_idx == 0 else 4 # Leo then Cancer
+        return 4 if shard_idx == 0 else 5 # Cancer then Leo
+            
+    elif division == 3: # Drekkana
+        return (sign_idx + (shard_idx * 4)) % 12 + 1
+        
+    elif division == 7: # Saptamsa
+        start = sign_idx if (sign_idx % 2 == 0) else (sign_idx + 6)
+        return (start + shard_idx) % 12 + 1
+        
+    elif division == 9: # Navamsa
+        cycle_start = [1, 10, 7, 4]
+        start_sign = cycle_start[sign_idx % 4]
+        return (start_sign + shard_idx - 1) % 12 + 1
 
-# --- Existing Logic (D1, D9, Ashtakavarga, Panchang) ---
+    elif division == 10: # Dasamsa
+        start = sign_idx if (sign_idx % 2 == 0) else (sign_idx + 8)
+        return (start + shard_idx) % 12 + 1
+        
+    # Default sequential for D12, D16, D24, D60
+    return (sign_idx + shard_idx) % 12 + 1
+
+def get_complete_varga_profile(chart: Dict) -> Dict[str, VargaAnalysis]:
+    profile = {}
+    for planet, data in chart.items():
+        lon = data["longitude"]
+        profile[planet] = VargaAnalysis(
+            d2_hora=get_varga_sign(lon, 2),
+            d3_drekkana=get_varga_sign(lon, 3),
+            d4_chaturtamsa=get_varga_sign(lon, 4),
+            d7_saptamsa=get_varga_sign(lon, 7),
+            d9_navamsa=get_varga_sign(lon, 9),
+            d10_dasamsa=get_varga_sign(lon, 10),
+            d12_dwadasamsa=get_varga_sign(lon, 12),
+            d16_shodasamsa=get_varga_sign(lon, 16),
+            d24_siddhamsa=get_varga_sign(lon, 24),
+            d60_shashtiamsa=get_varga_sign(lon, 60)
+        )
+    return profile
+
+# --- Supporting Logic ---
 def get_v4_panchang(sun_lon: float, moon_lon: float, timestamp) -> PanchangDetail:
     vara = DAYS[timestamp.weekday()]
     diff = (moon_lon - sun_lon + 360) % 360
     tithi_num = int(diff / 12) + 1
     return PanchangDetail(vara=vara, tithi=tithi_num, tithi_name=TITHI_NAMES[(tithi_num - 1) % 15], phase="Shukla" if diff < 180 else "Krishna")
-
-def get_v3_ashtakavarga(chart: Dict, lagna_sign: int) -> Dict[str, AshtakavargaDetail]:
-    results = {}
-    for planet, data in chart.items():
-        house = (data["sign"] - lagna_sign) % 12 + 1
-        score = 4
-        if house in [3, 6, 10, 11]: score += 1
-        if house in [1, 5, 9]: score += 1
-        results[planet] = AshtakavargaDetail(score=score, intensity="High" if score > 5 else "Moderate" if score >= 4 else "Low")
-    return results
-
-def get_navamsa_sign(planet_lon: float) -> int:
-    total_shards = int(planet_lon / (3.3333333333333335))
-    start_sign = [1, 10, 7, 4][int(planet_lon / 30) % 4]
-    return (start_sign + (total_shards % 9) - 1) % 12 + 1
-
-def get_v2_varga_analysis(chart: Dict) -> Dict[str, NavamsaDetail]:
-    return {p: NavamsaDetail(d9_sign=get_navamsa_sign(d["longitude"]), is_vargottama=(d["sign"] == get_navamsa_sign(d["longitude"])), potency="High" if (d["sign"] == get_navamsa_sign(d["longitude"])) else "Standard") for p, d in chart.items()}
-
-def get_dasha_details(moon_lon: float):
-    n_idx = int(moon_lon / 13.333333333333334)
-    ruler, years = DASHA_DATA[n_idx % 9]
-    rem = years * (1 - ((moon_lon % 13.333333333333334) / 13.333333333333334))
-    return {"nakshatra": NAKSHATRAS[n_idx], "current_dasha_ruler": ruler, "remaining_years": round(rem, 4)}
-
-def get_dasha_timeline(start_date, moon_lon: float):
-    det = get_dasha_details(moon_lon)
-    m_end = start_date + timedelta(days=det['remaining_years'] * 365.25)
-    return [{"period": det['current_dasha_ruler'], "status": "Current", "ends_on": m_end.strftime("%Y-%m-%d")}]
-
-def get_house_placements(chart: Dict, lagna_sign: int):
-    sig = {1: "Self", 2: "Wealth", 3: "Efforts", 4: "Home", 5: "Intelligence", 6: "Enemies", 7: "Partnerships", 8: "Transformation", 9: "Fortune", 10: "Career", 11: "Gains", 12: "Losses"}
-    return {p: HouseDetail(house=(d["sign"] - lagna_sign) % 12 + 1, domain=sig[(d["sign"] - lagna_sign) % 12 + 1]) for p, d in chart.items()}
 
 def get_planetary_strengths(chart: Dict, lagna_sign: int):
     dig = {"Jupiter": 1, "Mercury": 1, "Moon": 4, "Venus": 4, "Saturn": 7, "Rahu": 7, "Sun": 10, "Mars": 10}
