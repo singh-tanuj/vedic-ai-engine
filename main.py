@@ -5,7 +5,8 @@ from datetime import datetime
 from calculations import (
     get_dasha_details, get_dasha_timeline, 
     get_planetary_aspects, get_house_placements,
-    get_planetary_strengths, get_v2_varga_analysis
+    get_planetary_strengths, get_v2_varga_analysis,
+    get_v3_ashtakavarga
 )
 
 app = FastAPI()
@@ -18,7 +19,7 @@ PLANETS = {
 
 @app.get("/")
 def home():
-    return {"status": "V2 Vedic Engine Online", "features": ["D1", "D9", "Dasha", "Bala"]}
+    return {"status": "V3 Vedic Engine Online", "modules": ["D1", "D9", "Ashtakavarga", "Dasha"]}
 
 @app.get("/full-chart")
 def get_full_chart(
@@ -43,12 +44,12 @@ def get_full_chart(
     k_lon = (chart["Rahu"]["longitude"] + 180) % 360
     chart["Ketu"] = {"longitude": round(k_lon, 4), "sign": int(k_lon / 30) + 1}
 
-    # 3. Enhanced Intelligence Block (V2)
+    # 3. Production Intelligence Orchestration (V3)
     return {
-        "metadata": {"timestamp": now, "v_level": "2.0 (Navamsa)"},
+        "metadata": {"timestamp": now, "v_level": "3.0 (Ashtakavarga)"},
         "ascendant": {"longitude": round(ascmc[0], 4), "sign": lagna_sign},
-        "planetary_positions": chart,
-        "varga_d9_analysis": get_v2_varga_analysis(chart), # NEW: Sharded logic
+        "v3_ashtakavarga_heat_map": get_v3_ashtakavarga(chart, lagna_sign), # NEW
+        "varga_d9_analysis": get_v2_varga_analysis(chart),
         "planetary_strengths": get_planetary_strengths(chart, lagna_sign),
         "house_analysis": get_house_placements(chart, lagna_sign),
         "aspect_connections": get_planetary_aspects(chart),
