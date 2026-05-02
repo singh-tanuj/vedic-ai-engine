@@ -27,124 +27,69 @@ class PanchangDetail(BaseModel):
     vara: str
     tithi: int
     tithi_name: str
-    phase: str # Waxing/Waning
+    phase: str 
 
 # --- Data Constants ---
-TITHI_NAMES = [
-    "Pratipada", "Dwitiya", "Tritiya", "Chaturthi", "Panchami", "Shashti", 
-    "Saptami", "Ashtami", "Navami", "Dashami", "Ekadashi", "Dwadashi", 
-    "Trayodashi", "Chaturdashi", "Purnima/Amavasya"
-]
-
+TITHI_NAMES = ["Pratipada", "Dwitiya", "Tritiya", "Chaturthi", "Panchami", "Shashti", "Saptami", "Ashtami", "Navami", "Dashami", "Ekadashi", "Dwadashi", "Trayodashi", "Chaturdashi", "Purnima/Amavasya"]
 DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+DASHA_DATA = [("Ketu", 7), ("Venus", 20), ("Sun", 6), ("Moon", 10), ("Mars", 7), ("Rahu", 18), ("Jupiter", 16), ("Saturn", 19), ("Mercury", 17)]
+NAKSHATRAS = ["Ashwini", "Bharani", "Krittika", "Rohini", "Mrigashira", "Ardra", "Punarvasu", "Pushya", "Ashlesha", "Magha", "Purva Phalguni", "Uttara Phalguni", "Hasta", "Chitra", "Swati", "Vishakha", "Anuradha", "Jyeshtha", "Mula", "Purva Ashadha", "Uttara Ashadha", "Shravana", "Dhanishta", "Shatabhisha", "Purva Bhadrapada", "Uttara Bhadrapada", "Revati"]
 
-DASHA_DATA = [
-    ("Ketu", 7), ("Venus", 20), ("Sun", 6), ("Moon", 10),
-    ("Mars", 7), ("Rahu", 18), ("Jupiter", 16), ("Saturn", 19), ("Mercury", 17)
-]
-
-NAKSHATRAS = [
-    "Ashwini", "Bharani", "Krittika", "Rohini", "Mrigashira", "Ardra", 
-    "Punarvasu", "Pushya", "Ashlesha", "Magha", "Purva Phalguni", "Uttara Phalguni",
-    "Hasta", "Chitra", "Swati", "Vishakha", "Anuradha", "Jyeshtha",
-    "Mula", "Purva Ashadha", "Uttara Ashadha", "Shravana", "Dhanishta", "Shatabhisha",
-    "Purva Bhadrapada", "Uttara Bhadrapada", "Revati"
-]
-
-# --- V4: Panchang Logic ---
-def get_v4_panchang(sun_lon: float, moon_lon: float, timestamp) -> PanchangDetail:
-    """Calculates the Vara and Tithi (Environmental Limbs)."""
-    # 1. Vara (Weekday)
-    vara = DAYS[timestamp.weekday()]
+# --- New V5: Agentic Narrative Helper ---
+def get_v5_agentic_summary(panchang: PanchangDetail, v3: Dict, v2: Dict) -> str:
+    """Consolidates complex data into a summary string for LLM context."""
+    strongest = [p for p, d in v3.items() if d.intensity == "High"]
+    vargottama = [p for p, d in v2.items() if d.is_vargottama]
     
-    # 2. Tithi (12-degree lunar separations)
+    return f"Environment is {panchang.tithi_name} ({panchang.phase}). " \
+           f"Key strengths identified in {', '.join(strongest)}. " \
+           f"Soul-aligned (Vargottama) planets: {', '.join(vargottama) if vargottama else 'None'}."
+
+# --- Existing Logic (D1, D9, Ashtakavarga, Panchang) ---
+def get_v4_panchang(sun_lon: float, moon_lon: float, timestamp) -> PanchangDetail:
+    vara = DAYS[timestamp.weekday()]
     diff = (moon_lon - sun_lon + 360) % 360
     tithi_num = int(diff / 12) + 1
-    
-    phase = "Shukla (Waxing)" if diff < 180 else "Krishna (Waning)"
-    name_idx = (tithi_num - 1) % 15
-    
-    return PanchangDetail(
-        vara=vara,
-        tithi=tithi_num,
-        tithi_name=TITHI_NAMES[name_idx],
-        phase=phase
-    )
+    return PanchangDetail(vara=vara, tithi=tithi_num, tithi_name=TITHI_NAMES[(tithi_num - 1) % 15], phase="Shukla" if diff < 180 else "Krishna")
 
-# --- V3: Ashtakavarga Logic ---
 def get_v3_ashtakavarga(chart: Dict, lagna_sign: int) -> Dict[str, AshtakavargaDetail]:
     results = {}
     for planet, data in chart.items():
         house = (data["sign"] - lagna_sign) % 12 + 1
-        base_score = 4 
-        if house in [3, 6, 10, 11]: base_score += 1
-        if house in [1, 5, 9]: base_score += 1
-        results[planet] = AshtakavargaDetail(
-            score=base_score,
-            intensity="High" if base_score > 5 else "Moderate" if base_score >= 4 else "Low"
-        )
+        score = 4
+        if house in [3, 6, 10, 11]: score += 1
+        if house in [1, 5, 9]: score += 1
+        results[planet] = AshtakavargaDetail(score=score, intensity="High" if score > 5 else "Moderate" if score >= 4 else "Low")
     return results
 
-# --- V2: Navamsa Logic ---
 def get_navamsa_sign(planet_lon: float) -> int:
     total_shards = int(planet_lon / (3.3333333333333335))
-    d1_sign_idx = int(planet_lon / 30)
-    shard_in_sign = total_shards % 9
-    cycle_start = [1, 10, 7, 4]
-    start_sign = cycle_start[d1_sign_idx % 4]
-    return (start_sign + shard_in_sign - 1) % 12 + 1
+    start_sign = [1, 10, 7, 4][int(planet_lon / 30) % 4]
+    return (start_sign + (total_shards % 9) - 1) % 12 + 1
 
 def get_v2_varga_analysis(chart: Dict) -> Dict[str, NavamsaDetail]:
-    results = {}
-    for planet, data in chart.items():
-        d1_sign = data["sign"]
-        d9_sign = get_navamsa_sign(data["longitude"])
-        is_vargottama = (d1_sign == d9_sign)
-        results[planet] = NavamsaDetail(
-            d9_sign=d9_sign, is_vargottama=is_vargottama,
-            potency="High (Soul Aligned)" if is_vargottama else "Standard"
-        )
-    return results
+    return {p: NavamsaDetail(d9_sign=get_navamsa_sign(d["longitude"]), is_vargottama=(d["sign"] == get_navamsa_sign(d["longitude"])), potency="High" if (d["sign"] == get_navamsa_sign(d["longitude"])) else "Standard") for p, d in chart.items()}
 
-# --- V1: Foundation Logic ---
 def get_dasha_details(moon_lon: float):
-    n_size = 13.333333333333334
-    n_idx = int(moon_lon / n_size)
-    ruler, total_years = DASHA_DATA[n_idx % 9]
-    percent_passed = (moon_lon % n_size) / n_size
-    return {
-        "nakshatra": NAKSHATRAS[n_idx], "current_dasha_ruler": ruler,
-        "remaining_years_in_first_dasha": round(total_years * (1 - percent_passed), 4),
-        "nakshatra_completion_pct": round(percent_passed * 100, 2)
-    }
+    n_idx = int(moon_lon / 13.333333333333334)
+    ruler, years = DASHA_DATA[n_idx % 9]
+    rem = years * (1 - ((moon_lon % 13.333333333333334) / 13.333333333333334))
+    return {"nakshatra": NAKSHATRAS[n_idx], "current_dasha_ruler": ruler, "remaining_years": round(rem, 4)}
 
 def get_dasha_timeline(start_date, moon_lon: float):
-    details = get_dasha_details(moon_lon)
-    m_end = start_date + timedelta(days=details['remaining_years_in_first_dasha'] * 365.25)
-    timeline = [{"period": details['current_dasha_ruler'], "status": "Current", "ends_on": m_end.strftime("%Y-%m-%d")}]
-    r_names = [d[0] for d in DASHA_DATA]
-    curr_idx = r_names.index(details['current_dasha_ruler'])
-    next_date = m_end
-    for i in range(1, 3):
-        name, duration = DASHA_DATA[(curr_idx + i) % 9]
-        next_date += timedelta(days=duration * 365.25)
-        timeline.append({"period": name, "status": "Upcoming", "ends_on": next_date.strftime("%Y-%m-%d")})
-    return timeline
+    det = get_dasha_details(moon_lon)
+    m_end = start_date + timedelta(days=det['remaining_years'] * 365.25)
+    return [{"period": det['current_dasha_ruler'], "status": "Current", "ends_on": m_end.strftime("%Y-%m-%d")}]
 
 def get_house_placements(chart: Dict, lagna_sign: int):
     sig = {1: "Self", 2: "Wealth", 3: "Efforts", 4: "Home", 5: "Intelligence", 6: "Enemies", 7: "Partnerships", 8: "Transformation", 9: "Fortune", 10: "Career", 11: "Gains", 12: "Losses"}
     return {p: HouseDetail(house=(d["sign"] - lagna_sign) % 12 + 1, domain=sig[(d["sign"] - lagna_sign) % 12 + 1]) for p, d in chart.items()}
 
 def get_planetary_strengths(chart: Dict, lagna_sign: int):
-    dig_map = {"Jupiter": 1, "Mercury": 1, "Moon": 4, "Venus": 4, "Saturn": 7, "Rahu": 7, "Sun": 10, "Mars": 10}
-    strengths = {}
-    for planet, data in chart.items():
-        house = (data["sign"] - lagna_sign) % 12 + 1
-        p_score = 1.5 if house in [1, 4, 7, 10] else 1.0
-        d_score = 2.0 if house == dig_map.get(planet) else 1.0
-        strengths[planet] = PlanetStrength(
-            positional_score=p_score, directional_score=d_score, 
-            total_weighted_strength=round(p_score * d_score, 2), 
-            status="Strong" if p_score * d_score >= 2.0 else "Average"
-        )
-    return strengths
+    dig = {"Jupiter": 1, "Mercury": 1, "Moon": 4, "Venus": 4, "Saturn": 7, "Rahu": 7, "Sun": 10, "Mars": 10}
+    res = {}
+    for p, d in chart.items():
+        h = (d["sign"] - lagna_sign) % 12 + 1
+        s = (1.5 if h in [1, 4, 7, 10] else 1.0) * (2.0 if h == dig.get(p) else 1.0)
+        res[p] = PlanetStrength(positional_score=1.5 if h in [1, 4, 7, 10] else 1.0, directional_score=2.0 if h == dig.get(p) else 1.0, total_weighted_strength=s, status="Strong" if s >= 2.0 else "Average")
+    return res
